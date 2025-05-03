@@ -11,7 +11,7 @@ let cachedProject: Project | null = null;
 function getProject(tsconfigPath: string): Project {
 	if (!cachedProject) {
 		cachedProject = new Project({
-			tsConfigFilePath: tsconfigPath, // 可替换成 workspace tsconfig 路径
+			tsConfigFilePath: tsconfigPath, // can replace with workspace tsconfig 
 			//   skipFileDependencyResolution: true,
 		});
 	}
@@ -19,9 +19,9 @@ function getProject(tsconfigPath: string): Project {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	console.log('插件已激活');
+	console.log('plugin enabled');
 
-	const saveListener = vscode.workspace.onWillSaveTextDocument((event) => {
+	const saveListener = vscode.workspace.onWillSaveTextDocument(async (event) => {
 		const document = event.document;
 		const filePath = document.fileName;
 		// Only process TypeScript/TSX files
@@ -45,7 +45,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		// Exit if tsconfig.json is not found
 		if (!tsconfigPath) {
-			console.log(`在 ${filePath} 向上未找到 tsconfig.json。跳过 async/await 检查.`);
+			console.log(`can not find  tsconfig.json。skip async/await checking.`);
 			return; // Exit the listener for this file
 		}
 
@@ -173,22 +173,22 @@ export function activate(context: vscode.ExtensionContext) {
 							functionsToMakeAsync.add(fn);
 						}
 					} else {
-						// console.warn(`在 ${sourceFile.getFilePath()}:${call.getStartLineNumber()} 找到 Promise 调用，但未找到父函数。`);
+
 					}
 				} else if (returnsFunctionReturningPromise) {
-					console.log(`在 ${sourceFile.getFilePath()}:${call.getStartLineNumber()} 找到返回函数的 Promise 调用，跳过 await`);
+					console.log(` ${sourceFile.getFilePath()}:${call.getStartLineNumber()} skip await`);
 				}
 			} catch (error: any) {
-				console.error(`处理文件 ${filePath} 中的调用时出错: ${error.message}`);
+				console.error(` ${filePath} : ${error.message}`);
 			}
 		}
 
 		// If there are edits, apply them before the document is saved
 		if (edits.length > 0) {
-			console.log(`在 ${filePath} 应用 ${edits.length} 个编辑操作 (await/async)`);
-			event.waitUntil(Promise.resolve(edits));
+			console.log(`found ${edits.length} (await/async) in ${filePath}`);
+			event.waitUntil(Promise.resolve(edits)); //no-await
 		} else {
-			console.log(`在 ${filePath} 未找到需要自动添加 await/async 的地方`);
+			console.log(`no change`);
 		}
 	});
 
@@ -197,5 +197,5 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
-	console.log('插件已停用');
+	console.log('plugin enabled');
 }

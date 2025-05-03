@@ -2,6 +2,8 @@
 
 [This VScode extension](https://marketplace.visualstudio.com/items?itemName=StanNthe5.typescript-autoawait) automatically add missing 'async/await' keywords when you save a typescript file.
 
+# Usage
+There must be a "tsconfig.json" in your project folder.
 
 # Example
 
