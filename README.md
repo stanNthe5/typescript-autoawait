@@ -1,9 +1,9 @@
 # TypeScript Autoawait 
 
-[This VScode extension](https://marketplace.visualstudio.com/items?itemName=StanNthe5.typescript-autoawait) automatically add missing'async/await' keywords when you save a typescript file.
+[This VScode extension](https://marketplace.visualstudio.com/items?itemName=StanNthe5.typescript-autoawait) automatically add missing 'async/await' keywords when you save a typescript file.
 
 
-# Usage
+# Example
 
 ## add "await" and/or "async"
 ### 1
