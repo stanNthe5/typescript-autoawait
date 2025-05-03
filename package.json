@@ -4,6 +4,7 @@
   "description": "automatically add missing'async/await' keywords when you save a typescript file.",
   "version": "0.0.2",
   "publisher": "StanNthe5",
+  "repository": "https://github.com/stanNthe5/typescript-autoawait",
   "engines": {
     "vscode": "^1.99.0"
   },
