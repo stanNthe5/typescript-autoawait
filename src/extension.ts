@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ArrowFunction, FunctionDeclaration, FunctionExpression, Node, Project, SyntaxKind } from 'ts-morph';
 import * as vscode from 'vscode';
 
-const SKIP_AWAIT_MARKER = 'no-await';
+const SKIP_AWAIT_MARKER = 'promise';
 
 let cachedProject: Project | null = null;
 
@@ -186,7 +186,7 @@ export function activate(context: vscode.ExtensionContext) {
 		// If there are edits, apply them before the document is saved
 		if (edits.length > 0) {
 			console.log(`found ${edits.length} (await/async) in ${filePath}`);
-			event.waitUntil(Promise.resolve(edits)); //no-await
+			event.waitUntil(Promise.resolve(edits)); //async
 		} else {
 			console.log(`no change`);
 		}

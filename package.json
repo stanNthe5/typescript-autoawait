@@ -2,7 +2,7 @@
   "name": "typescript-autoawait",
   "displayName": "Typescript Autoawait",
   "description": "automatically add missing'async/await' keywords when you save a typescript file.",
-  "version": "0.0.3",
+  "version": "0.0.7",
   "publisher": "StanNthe5",
   "repository": "https://github.com/stanNthe5/typescript-autoawait",
   "icon": "icon.png",
