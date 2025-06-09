@@ -6,17 +6,15 @@ import * as vscode from 'vscode';
 let projectInstance: Project | undefined;
 let isInsertingAwait: boolean = false;
 const invalidVarCharsRegex = /[^a-zA-Z0-9_$]/;
+// const outputChannel = vscode.window.createOutputChannel('Auto Await');
 
 
 export function activate(context: vscode.ExtensionContext) {
-
-	const workspaceFolders = vscode.workspace.workspaceFolders;
-	// if (workspaceFolders && workspaceFolders.length > 0) {
-	//     projectInstance = new Project({ });
-	// }
-
+	vscode.window.showInformationMessage('My Plugin Activated');
+	// outputChannel.appendLine('AutoAwait actived');
+	// outputChannel.show(true);
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(async (event: vscode.TextDocumentChangeEvent) => {
-		console.log('event.contentChanges:', event.contentChanges)
+
 		const document = event.document;
 
 
@@ -45,14 +43,13 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 		let addedImportedSymbolName
 		if (event.contentChanges.length === 1 && event.contentChanges[0].text.length > 1) {
-			console.log('debug event.contentChanges[0].text', event.contentChanges[0].text)
 			addedImportedSymbolName = isFunctionCallFormat(event.contentChanges[0].text)
 			if (!addedImportedSymbolName) {
 
 				if (event.contentChanges[0].text.match(/^await /)) {
 
 					let pos = editor.selection.active;
-					console.log('debug document.offsetAt(pos)', document.offsetAt(pos))
+
 					const nodeAtCursor = sourceFile.getDescendantAtPos(document.offsetAt(pos) + 6 - event.contentChanges[0].text.length);
 					if (!nodeAtCursor) {
 
@@ -78,7 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 				return
 			}
-			console.log('got addedImportedSymbolName', addedImportedSymbolName)
+
 		} else {
 
 			return
@@ -120,7 +117,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		let { symbol, symbolPosition } = symbolRes
-		console.log('debug got symbol: ', symbol.getName())
+
 
 		let type: Type | undefined;
 		try {
@@ -138,7 +135,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const isPromise = isPromiseType(type, typeChecker);
 		const isFunction = isFunctionType(type);
-		console.log('debug isPromiseisFunction', symbol.getName(), isPromise, isFunction)
+
 		let returnsPromise = false;
 		if (isFunction && !isPromise) {
 			returnsPromise = type.getCallSignatures().some(signature => {
@@ -402,7 +399,7 @@ function checkIfInAsyncContextAndGetInsertPosition(
 			return { isInAsyncContext: true };
 		} else {
 			const insertOffset = funcNode.getStart();
-			console.log('debug insertOffset', insertOffset)
+
 			const insertPosition = document.positionAt(insertOffset);
 			return { isInAsyncContext: false, insertPosition: insertPosition };
 		}

@@ -2,7 +2,7 @@
   "name": "typescript-autoawait",
   "displayName": "Typescript Autoawait",
   "description": "automatically add missing'async/await' keywords when you save a typescript file.",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "publisher": "StanNthe5",
   "repository": "https://github.com/stanNthe5/typescript-autoawait",
   "icon": "icon.png",
@@ -13,14 +13,17 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onLanguage:typescript"
   ],
   "main": "./out/extension.js",
   "contributes": {
-    "commands": [
+    "languages": [
       {
-        "command": "autoawait.helloWorld",
-        "title": "Hello World"
+        "id": "typescript",
+        "extensions": [
+          ".ts",
+          ".tsx"
+        ]
       }
     ]
   },
@@ -40,10 +43,10 @@
     "@typescript-eslint/parser": "^8.28.0",
     "@vscode/test-cli": "^0.0.10",
     "@vscode/test-electron": "^2.4.1",
-    "eslint": "^9.23.0",
-    "typescript": "^5.8.2"
+    "eslint": "^9.23.0"
   },
   "dependencies": {
-    "ts-morph": "^25.0.1"
+    "ts-morph": "^25.0.1",
+    "typescript": "^5.8.2"
   }
 }
