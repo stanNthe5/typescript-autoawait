@@ -2,67 +2,185 @@ import * as path from 'path';
 import { CallExpression, Identifier, ModuleKind, Node, Project, PropertyAccessExpression, ScriptTarget, SourceFile, SyntaxKind, Symbol as TsMorphSymbol, Type, TypeChecker } from 'ts-morph';
 import * as ts from 'typescript';
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 
-let projectInstance: Project | undefined;
-let isInsertingAwait: boolean = false;
-const invalidVarCharsRegex = /[^a-zA-Z0-9_$]/;
-// const outputChannel = vscode.window.createOutputChannel('Auto Await');
+const projectCache = new Map<string, Project>();
+
+let isInserting: boolean = false;
+let gotImport = false
+export async function getProjectForDocument(document: vscode.TextDocument): Promise<Project> {
+	const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
+	const projectRoot = workspaceFolder
+		? workspaceFolder.uri.fsPath
+		: path.dirname(document.fileName);
+
+	// 如果缓存中已有，直接返回
+	if (projectCache.has(projectRoot)) {
+		return projectCache.get(projectRoot)!;
+	}
+
+	// 查找 tsconfig.json
+	const filesInRoot = await vscode.workspace.fs.readDirectory(vscode.Uri.file(projectRoot));
+	let tsconfigPath = '';
+	for (const [name, type] of filesInRoot) {
+		if (name === 'tsconfig.json' && type === vscode.FileType.File) {
+			tsconfigPath = path.join(projectRoot, name);
+			break;
+		}
+	}
+
+	let project: Project;
+	if (tsconfigPath) {
+		project = new Project({ tsConfigFilePath: tsconfigPath });
+	} else {
+		project = new Project({
+			compilerOptions: {
+				target: ScriptTarget.ESNext,
+				module: ModuleKind.CommonJS,
+				allowJs: true,
+				checkJs: true,
+				jsx: ts.JsxEmit.React,
+				strict: true,
+				esModuleInterop: true,
+				forceConsistentCasingInFileNames: true,
+				skipLibCheck: true,
+			},
+		});
+	}
+
+	projectCache.set(projectRoot, project); // 缓存起来
+	return project;
+}
 
 
 export function activate(context: vscode.ExtensionContext) {
-	vscode.window.showInformationMessage('My Plugin Activated');
-	// outputChannel.appendLine('AutoAwait actived');
-	// outputChannel.show(true);
+	const workspaceFolders = vscode.workspace.workspaceFolders;
+	if (!workspaceFolders) {
+		return;
+	}
+	const rootPath = workspaceFolders[0].uri.fsPath;
+	const packageJsonPath = path.join(rootPath, 'package.json');
+	if (isFrontEnd(packageJsonPath)) {
+
+		return
+	}
 	context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(async (event: vscode.TextDocumentChangeEvent) => {
 
 		const document = event.document;
-
 
 		if (document.languageId !== 'typescript' && document.languageId !== 'typescriptreact') {
 			return;
 		}
 
-		if (!projectInstance) {
-
+		if (isInserting) {
 			return;
 		}
 
-		if (isInsertingAwait) {
 
-			return;
-		}
-
-		const editor = vscode.window.activeTextEditor;
-		if (!editor || editor.document.uri.fsPath !== document.uri.fsPath) {
-
-			return;
-		}
-		let sourceFile = projectInstance.getSourceFile(document.fileName);
-		if (!sourceFile) {
-			return
-		}
-		let addedImportedSymbolName
 		if (event.contentChanges.length === 1 && event.contentChanges[0].text.length > 1) {
-			addedImportedSymbolName = isFunctionCallFormat(event.contentChanges[0].text)
-			if (!addedImportedSymbolName) {
+			let name = event.contentChanges[0].text
+			let offsetMoveLeft = 1
+			if (name.startsWith('import ') || name.match(/^, [0-9a-z_]+$/i)) {
+				gotImport = true
+				return
+			}
+			if (name.includes('await')) {
+				return
+			}
+			let isCompletedCall: boolean | { name: string, firstArgLength: number } = false
+			if (!name.match(/^\.?[a-z]+[0-9a-z_]+$/i)) {
+				isCompletedCall = matchFunctionCall(name) ?? false
+				if (!isCompletedCall) {
+					return
+				}
+				console.log(isCompletedCall)
+				offsetMoveLeft = isCompletedCall.firstArgLength + 2
+				name = isCompletedCall.name
+			}
+			let project = await getProjectForDocument(document)
+			const editor = vscode.window.activeTextEditor;
+			if (!editor || editor.document.uri.fsPath !== document.uri.fsPath) {
+				return;
+			}
+			let sourceFile = project.getSourceFile(document.fileName);
+			if (!sourceFile) {
+				sourceFile = project.createSourceFile(document.fileName, document.getText(), { overwrite: true });
+			}
+			let tmpOffset = document.offsetAt(editor.selection.active) - offsetMoveLeft
+			const tmpNode = sourceFile.getDescendantAtPos(tmpOffset);
+			if (!tmpNode) {
+				return
+			}
+			let tmpPosition = editor.selection.active;
+			await new Promise(r => setTimeout(r, 50));
 
-				if (event.contentChanges[0].text.match(/^await /)) {
+			if (gotImport) {
+				// if got import, wait more
+				await new Promise(r => setTimeout(r, 30));
+			}
 
-					let pos = editor.selection.active;
+			let position = editor.selection.active;
+			// if (gotImport || tmpPosition.line !== position.line) {
+			// 	console.time('reload source')
+			// 	sourceFile.replaceWithText(document.getText());
+			// 	console.timeEnd('reload source')
+			// }
+			// console.time('reload source')
+			sourceFile.replaceWithText(document.getText());
+			// console.timeEnd('reload source')
+			gotImport = false
 
-					const nodeAtCursor = sourceFile.getDescendantAtPos(document.offsetAt(pos) + 6 - event.contentChanges[0].text.length);
-					if (!nodeAtCursor) {
+			const offset = document.offsetAt(position);
+			const nodeAtCursor = sourceFile.getDescendantAtPos(offset - offsetMoveLeft);
+			if (!nodeAtCursor) {
+				return
+			}
+			let fullName = getFullNodeName(nodeAtCursor)
 
-						return
-					}
+			nodeAtCursor.getSymbol()
+
+			let symbol = nodeAtCursor.getSymbol()
+			if (!symbol) {
+
+				return
+			}
+
+
+			let type: Type | undefined;
+			try {
+				type = symbol.getTypeAtLocation(nodeAtCursor);
+
+			} catch (e) {
+				console.error(`[onDidChangeTextDocument] Error getting type for symbol ${name}:`, e);
+				return;
+			}
+
+			if (!type) {
+				return;
+			}
+
+			const isPromise = isPromiseType(type);
+			const isFunction = isFunctionType(type);
+
+			if (!isPromise && !isFunction) {
+				// do nothing
+				return
+			}
+			isInserting = true;
+			try {
+				if (isPromise) {
+					// insert await
+					const insertPos = isCompletedCall ?
+						new vscode.Position(position.line, position.character - fullName.length - isCompletedCall.firstArgLength - 1) :
+						new vscode.Position(position.line, position.character - fullName.length);
+
+					await editor.edit(editBuilder => {
+						editBuilder.insert(insertPos, 'await ');
+					});
+					// insert async
 					const isInAsyncContextResult = checkIfInAsyncContextAndGetInsertPosition(nodeAtCursor, document);
 					if (!isInAsyncContextResult.isInAsyncContext) {
 
-						const editor = vscode.window.activeTextEditor;
-						if (!editor) {
-
-							return
-						}
 						if (isInAsyncContextResult.insertPosition) {
 
 							await editor.edit(editBuilder => {
@@ -73,314 +191,48 @@ export function activate(context: vscode.ExtensionContext) {
 						}
 					}
 				}
-				return
-			}
+				if (isFunction && !isCompletedCall) {
 
-		} else {
+					const signatures = type.getCallSignatures();
+					const signature = signatures[0];
+					const parameters = signature.getParameters();
+					if (isPromise) {
+						const insertPos = new vscode.Position(position.line, position.character + 6);
+						await editor.edit(editBuilder => {
 
-			return
-		}
-
-		if (!addedImportedSymbolName) {
-
-			return;
-		}
-
-		await new Promise(resolve => setTimeout(resolve, 80));
-		const position = editor.selection.active; // cursor position
-
-		if (!sourceFile) {
-
-			sourceFile = projectInstance.createSourceFile(document.fileName, document.getText(), { overwrite: true });
-		} else {
-			sourceFile.replaceWithText(document.getText());
-		}
-
-		const offset = document.offsetAt(position);
-		const nodeAtCursor = sourceFile.getDescendantAtPos(offset);
-
-		if (!nodeAtCursor) {
-
-			return;
-		}
-
-		const typeChecker = projectInstance.getTypeChecker();
-
-		const lineText = document.lineAt(position.line).text;
-		let symbolNameToCheck = addedImportedSymbolName;
-		// let symbolPosition: vscode.Position | undefined;
-		let symbolRes = getSymbolBeforeCursor(document, position, projectInstance, sourceFile)
-
-		if (!symbolRes) {
-
-			return
-		}
-
-		let { symbol, symbolPosition } = symbolRes
-
-
-		let type: Type | undefined;
-		try {
-			type = symbol.getTypeAtLocation(nodeAtCursor);
-
-		} catch (e) {
-			console.error(`[onDidChangeTextDocument] Error getting type for symbol ${symbolNameToCheck}:`, e);
-			return;
-		}
-
-		if (!type) {
-
-			return;
-		}
-
-		const isPromise = isPromiseType(type, typeChecker);
-		const isFunction = isFunctionType(type);
-
-		let returnsPromise = false;
-		if (isFunction && !isPromise) {
-			returnsPromise = type.getCallSignatures().some(signature => {
-				return isPromiseType(signature.getReturnType(), typeChecker);
-			});
-
-		}
-
-		if ((isPromise || returnsPromise)) {
-
-			const textBeforeSymbol = lineText.slice(0, symbolPosition?.character ?? position.character);
-			const hasAwait = /\bawait\b\s*$/.test(textBeforeSymbol.trim());
-
-
-			if (!hasAwait) {
-				const insertPos = symbolPosition || position;
-
-				isInsertingAwait = true;
-				// insert await
-				await editor.edit(editBuilder => {
-					editBuilder.insert(insertPos, 'await ');
-				});
-				// insert async
-				const isInAsyncContextResult = checkIfInAsyncContextAndGetInsertPosition(nodeAtCursor, document);
-				if (!isInAsyncContextResult.isInAsyncContext) {
-
-					if (isInAsyncContextResult.insertPosition) {
+							editBuilder.insert(insertPos, '()');
+						});
+						if (parameters.length) {
+							const newPos = position.with(position.line, insertPos.character + 1);
+							editor.selection = new vscode.Selection(newPos, newPos);
+						}
+					} else {
 
 						await editor.edit(editBuilder => {
-							editBuilder.insert(isInAsyncContextResult.insertPosition!, 'async ');
+							editBuilder.insert(position, '()');
 						});
-					} else {
+						if (parameters.length) {
+							const newPos = position.with(position.line, position.character + 1);
+							editor.selection = new vscode.Selection(newPos, newPos);
+						}
+					}
+					if (parameters.length) {
+						await vscode.commands.executeCommand('editor.action.triggerParameterHints');
 
 					}
 				}
-				isInsertingAwait = false;
-			} else {
-
+			} catch (e) {
+				console.log('err', e)
+			} finally {
+				isInserting = false;
 			}
+
 		} else {
 
+			return
 		}
+
 	}));
-
-
-	const provider = vscode.languages.registerCompletionItemProvider(
-		{ scheme: 'file', language: 'typescript' },
-		{
-			async provideCompletionItems(document: vscode.TextDocument, position: vscode.Position, token: vscode.CancellationToken, context: vscode.CompletionContext) {
-
-				// ignore ctrl+space
-				const linePrefix1 = document.lineAt(position).text.substring(0, position.character);
-				if (linePrefix1.length === 0) {
-					return undefined;
-				}
-				const lastChar = linePrefix1[linePrefix1.length - 1];
-				if (invalidVarCharsRegex.test(lastChar)) {
-					return undefined;
-				}
-
-				if (!projectInstance) {
-					const workspaceFolder = vscode.workspace.getWorkspaceFolder(document.uri);
-					const projectRoot = workspaceFolder ? workspaceFolder.uri.fsPath : path.dirname(document.fileName);
-
-					let tsconfigPath: string | undefined;
-
-					try {
-						const filesInRoot = await vscode.workspace.fs.readDirectory(vscode.Uri.file(projectRoot));
-						for (const [name, type] of filesInRoot) {
-							if (name === 'tsconfig.json' && type === vscode.FileType.File) {
-								tsconfigPath = path.join(projectRoot, name);
-								break;
-							}
-						}
-
-						if (tsconfigPath) {
-							projectInstance = new Project({
-								tsConfigFilePath: tsconfigPath,
-							});
-						} else {
-							projectInstance = new Project({
-								compilerOptions: {
-									target: ScriptTarget.ESNext,
-									module: ModuleKind.CommonJS,
-									allowJs: true,
-									checkJs: true,
-									jsx: ts.JsxEmit.React,
-									strict: true,
-									esModuleInterop: true,
-									forceConsistentCasingInFileNames: true,
-									skipLibCheck: true,
-								},
-							});
-						}
-					} catch (e) {
-
-						projectInstance = new Project({
-							compilerOptions: {
-								target: ScriptTarget.ESNext,
-								module: ModuleKind.CommonJS,
-							}
-						});
-					}
-				}
-
-				let sourceFile = projectInstance.getSourceFile(document.fileName);
-				if (!sourceFile) {
-					sourceFile = projectInstance.createSourceFile(document.fileName, document.getText(), { overwrite: true });
-				} else {
-					sourceFile.replaceWithText(document.getText());
-				}
-
-				const offset = document.offsetAt(position);
-				const nodeAtCursor = sourceFile.getDescendantAtPos(offset);
-
-				if (!nodeAtCursor) {
-					return undefined;
-				}
-
-				const completions: vscode.CompletionItem[] = [];
-				const typeChecker = projectInstance.getTypeChecker();
-
-				const currentWordRange = document.getWordRangeAtPosition(position);
-				const currentWord = currentWordRange ? document.getText(currentWordRange) : '';
-				const linePrefix = document.lineAt(position).text.slice(0, position.character);
-				const hasAwait = /\bawait\b\s*$/.test(linePrefix.trim());
-
-				const symbolsInScope = typeChecker.getSymbolsInScope(
-					nodeAtCursor,
-					ts.SymbolFlags.Function | ts.SymbolFlags.Variable | ts.SymbolFlags.Alias | ts.SymbolFlags.Property
-				);
-
-				for (const symbol of symbolsInScope) {
-					const name = symbol.getName();
-
-					if (name.startsWith('__') || (currentWord && !name.startsWith(currentWord))) {
-						continue;
-					}
-
-					let type: Type | undefined;
-					try {
-						type = symbol.getTypeAtLocation(nodeAtCursor);
-					} catch (e) {
-						type = undefined;
-					}
-
-					if (!type) {
-						continue;
-					}
-
-
-					const isPromise = isPromiseType(type, typeChecker);
-					const isFunction = isFunctionType(type);
-
-					let returnsPromise = false;
-					if (isFunction && !isPromise) {
-						returnsPromise = type.getCallSignatures().some(signature => {
-							return isPromiseType(signature.getReturnType(), typeChecker);
-						});
-
-					}
-
-					if (!isPromise && !isFunction && !returnsPromise) {
-						continue;
-					}
-
-					const completionKind = isFunction ? vscode.CompletionItemKind.Function : vscode.CompletionItemKind.Variable;
-					const completion = new vscode.CompletionItem(name, completionKind);
-
-					let insertText = name;
-					let needsTriggerParameterHints = false;
-
-					if (isFunction) {
-						const callSignatures = type.getCallSignatures();
-						if (callSignatures.length > 0) {
-							const signature = callSignatures[0];
-							const parameters = signature.getParameters();
-
-							let requiredParams: string[] = [];
-							let tabStopCounter = 1;
-
-							for (const paramSymbol of parameters) {
-								const paramDeclaration = paramSymbol.getDeclarations()?.[0];
-								if (paramDeclaration && Node.isParameterDeclaration(paramDeclaration)) {
-									const isOptional = paramDeclaration.isOptional() || paramDeclaration.hasInitializer();
-									const isRest = paramDeclaration.isRestParameter();
-
-									if (!isOptional && !isRest) {
-										requiredParams.push(`$${tabStopCounter}`);
-										tabStopCounter++;
-									}
-								}
-							}
-
-							if (requiredParams.length > 0) {
-								insertText += `(${requiredParams.join(', ')})$0`;
-								needsTriggerParameterHints = true;
-							} else {
-								insertText += '()$0';
-							}
-						} else {
-							insertText += '()$0';
-						}
-					} else {
-						insertText += '$0';
-					}
-
-					if ((isPromise || returnsPromise) && !hasAwait) {
-						insertText = 'await ' + insertText;
-
-					} else {
-
-					}
-
-					completion.insertText = new vscode.SnippetString(insertText);
-					completion.sortText = '!' + name;
-
-					if (needsTriggerParameterHints) {
-						completion.command = {
-							command: 'editor.action.triggerParameterHints',
-							title: 'Trigger Parameter Hints'
-						};
-					}
-
-					if (currentWordRange) {
-						completion.range = currentWordRange;
-					}
-
-					const typeString = typeChecker.getTypeText(type);
-					completion.detail = `${(isPromise || returnsPromise) ? 'async ' : ''}${name}: ${typeString}`;
-					completion.documentation = new vscode.MarkdownString(
-						(isPromise || returnsPromise) ? 'Auto-awaited Promise returning function/variable' : 'Function/variable'
-					);
-
-					completions.push(completion);
-				}
-
-				return completions;
-			}
-		},
-		'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_$'
-	);
-
-	context.subscriptions.push(provider);
-
 }
 
 function checkIfInAsyncContextAndGetInsertPosition(
@@ -408,6 +260,18 @@ function checkIfInAsyncContextAndGetInsertPosition(
 	return { isInAsyncContext: false };
 }
 
+function getFullNodeName(node: any) {
+	while (
+		node.getParent() &&
+		(node.getParent().getKind() === SyntaxKind.PropertyAccessExpression ||
+			node.getParent().getKind() === SyntaxKind.ElementAccessExpression)
+	) {
+		node = node.getParent();
+	}
+
+	return node.getText().trim();
+}
+
 function checkIfInAsyncContext(nodeAtCursor: Node, sourceFile: SourceFile): boolean {
 	const funcNode = nodeAtCursor.getAncestors().find(ancestor =>
 		Node.isFunctionLikeDeclaration(ancestor)
@@ -420,7 +284,19 @@ function checkIfInAsyncContext(nodeAtCursor: Node, sourceFile: SourceFile): bool
 	return false;
 }
 
-function isPromiseType(type: Type, typeChecker: TypeChecker): boolean {
+function matchFunctionCall(str: string) {
+	const regex = /^([a-zA-Z_]\w*)\s*\(\s*([^)]*)?\s*\)$/;
+	const match = str.match(regex);
+	if (!match) {
+		return null;
+	}
+
+	const funcName = match[1];
+	const args = match[2] ? match[2].split(/\s*,\s*/).filter(Boolean) : [];
+	return { name: funcName, firstArgLength: args[0] ? args[0].length : 0 };
+}
+
+function isPromiseType(type: Type): boolean {
 	if (!type) { return false }
 
 	const symbol = type.getSymbol();
@@ -438,7 +314,7 @@ function isPromiseType(type: Type, typeChecker: TypeChecker): boolean {
 			return true;
 		}
 		for (const arg of typeArguments) {
-			if (isPromiseType(arg, typeChecker)) {
+			if (isPromiseType(arg)) {
 				return true;
 			}
 		}
@@ -447,19 +323,19 @@ function isPromiseType(type: Type, typeChecker: TypeChecker): boolean {
 	if (type.getCallSignatures().length > 0) {
 		return type.getCallSignatures().some(signature => {
 			const returnType = signature.getReturnType();
-			return isPromiseType(returnType, typeChecker);
+			return isPromiseType(returnType);
 		});
 	}
 
 	if (type.isUnion()) {
 		return type.getUnionTypes().some(t =>
-			isPromiseType(t, typeChecker)
+			isPromiseType(t)
 		);
 	}
 
 	const baseTypes = type.getBaseTypes() || [];
 	for (const baseType of baseTypes) {
-		if (isPromiseType(baseType, typeChecker)) {
+		if (isPromiseType(baseType)) {
 			return true;
 		}
 	}
@@ -472,99 +348,21 @@ function isFunctionType(type: Type): boolean {
 	return type.getCallSignatures().length > 0;
 }
 
-export function deactivate() {
+function isFrontEnd(packageJsonPath: string) {
+	if (fs.existsSync(packageJsonPath)) {
+		try {
+			const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+			const deps = Object.assign({}, pkg.dependencies, pkg.devDependencies);
 
-	projectInstance = undefined;
-}
+			const hasReact =
+				deps['react'] !== undefined || deps['react-dom'] !== undefined || deps['next'] !== undefined;
 
+			if (hasReact) {
 
-function isFunctionCallFormat(str: string): string | undefined {
-	const regex = /^\.?\s*([a-zA-Z_]\w*)\s*\(([^()]*)\)\s*$/;
-
-	const match = str.match(regex);
-	if (!match) { return; }
-
-	const funcName = match[1];
-	return funcName;
-}
-
-interface FunctionSymbolInfo {
-	symbol: TsMorphSymbol;
-	symbolPosition: vscode.Position;
-	calledSymbolPosition: vscode.Position;
-}
-
-
-function getSymbolBeforeCursor(
-	document: vscode.TextDocument,
-	position: vscode.Position,
-	project: Project,
-	sourceFile: SourceFile
-): { symbol: TsMorphSymbol; symbolPosition: vscode.Position } | undefined {
-	const fileContent = document.getText();
-	const offset = document.offsetAt(position);
-
-	let currentNode = sourceFile.getDescendantAtPos(offset);
-
-	let callExpression: CallExpression | undefined;
-	while (currentNode) {
-		if (currentNode.isKind(SyntaxKind.CallExpression)) {
-			callExpression = currentNode as CallExpression;
-			if (offset >= callExpression.getStart() && offset <= callExpression.getEnd()) {
-				break;
+				return true
 			}
+		} catch (err) {
+			console.error('[my-plugin] Failed to read package.json:', err);
 		}
-		currentNode = currentNode.getParent();
 	}
-
-	if (!callExpression) {
-		const textBeforeCursor = fileContent.substring(0, offset);
-		const lastParenIndex = textBeforeCursor.lastIndexOf('(');
-		if (lastParenIndex !== -1) {
-			const potentialExpressionText = textBeforeCursor.substring(0, lastParenIndex).trimEnd();
-			if (potentialExpressionText.length > 0) {
-				const tempSourceFile = project.createSourceFile("temp2.ts", `(${potentialExpressionText})`);
-				const tempNode = tempSourceFile.getFirstChildByKind(SyntaxKind.ParenthesizedExpression)?.getExpression();
-
-				if (tempNode?.isKind(SyntaxKind.Identifier)) {
-					const identifierOffset = offset - tempNode.getWidth() - 1;
-					const identifierNode = sourceFile.getDescendantAtPos(identifierOffset);
-					if (identifierNode?.isKind(SyntaxKind.Identifier) && identifierNode.getText() === tempNode.getText()) {
-						return { symbol: identifierNode.getSymbol()!, symbolPosition: document.positionAt(identifierNode.getStart()) };
-					}
-				} else if (tempNode?.isKind(SyntaxKind.PropertyAccessExpression)) {
-					const propertyAccessOffset = offset - tempNode.getWidth() - 1;
-					const propertyAccessNode = sourceFile.getDescendantAtPos(propertyAccessOffset);
-					if (propertyAccessNode?.isKind(SyntaxKind.PropertyAccessExpression)) {
-						const nameNode = (propertyAccessNode as PropertyAccessExpression).getNameNode();
-						if (nameNode.getText() === (tempNode as PropertyAccessExpression).getNameNode().getText()) {
-							return { symbol: nameNode.getSymbol()!, symbolPosition: document.positionAt(propertyAccessNode.getStart()) };
-						}
-					}
-				}
-			}
-		}
-		return undefined;
-	}
-
-	const expression = callExpression.getExpression();
-	let targetIdentifier: Identifier | undefined;
-
-	if (expression.isKind(SyntaxKind.Identifier)) {
-		targetIdentifier = expression as Identifier;
-	} else if (expression.isKind(SyntaxKind.PropertyAccessExpression)) {
-		targetIdentifier = (expression as PropertyAccessExpression).getNameNode();
-	}
-
-	if (targetIdentifier) {
-		const insertOffset = callExpression.getStart();
-		const insertPosition = document.positionAt(insertOffset);
-
-		return {
-			symbol: targetIdentifier.getSymbol()!, // make user symbol exists
-			symbolPosition: insertPosition
-		};
-	}
-
-	return undefined;
 }
